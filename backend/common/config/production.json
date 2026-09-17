@@ -1,0 +1,93 @@
+{
+    "env": "production",
+    "agentic": {
+      "server": {
+        "port": "$AVA_SERVER_PORT",
+        "env_name": "$ENVIRONMENT_NAME"
+      }
+    },
+    "bot_redis": {
+      "host": "$REDIS_HOST",
+      "port": "$REDIS_PORT",
+      "name": "$REDIS_MASTER_NAME",
+      "standalone": {
+        "host": "$REDIS_STANDALONE_HOST",
+        "port": "$REDIS_STANDALONE_PORT"
+      }
+    },
+    "database": {
+      "host": "$MONGO_HOST",
+      "user": "$MONGO_USER",
+      "password": "$MONGO_PASSWORD",
+      "name": "$MONGO_NAME"
+    },
+    "mysql": {
+      "read": {
+        "host": "$MYSQL_READ_HOST"
+      },
+      "write": {
+        "host": "$MYSQL_WRITE_HOST"
+      },
+      "database": "$MYSQL_DATABASE",
+      "user": "$MYSQL_USER",
+      "password": "$MYSQL_PASSWORD"
+    },
+    "encryption": {
+      "primary_key": "635266546A576E5A7234753778214125442A472D4B6150645367566B58703273"
+    },
+    "aws": {
+      "config": {
+        "access_key_id": "$AWS_ACCESS_KEY_ID",
+        "secret_access_key": "$AWS_SECRET_ACCESS_KEY",
+        "region": "$AWS_REGION",
+        "bucket_name": "$AWS_BUCKET_NAME"
+      }
+    },
+    "google_tts": {
+      "synthesize": "https://texttospeech.googleapis.com/v1beta1/text:synthesize"
+    },
+    "google_tts_creds": "$GOOGLE_TTS_CREDS_PATH",
+    "tts": {
+      "file_domain_url": "https://test.call-ai.com/recordings"
+    },
+    "azure": {
+      "key": "$AZURE_KEY",
+      "region": "$AZURE_REGION"
+    },
+    "distUrl": "/",
+    "keycloak": {
+      "url": "$KEYCLOAK_URL",
+      "admin_realm_url": "$KEYCLOAK_REALM_URL",
+      "realm": "$KEYCLOAK_REALM",
+      "client_secret": "$KEYCLOAK_SECRET",
+      "client_id": "$KEYCLOAK_CLIENT_ID",
+      "grant_type": "client_credentials",
+      "required_actions": [
+        "VERIFY_EMAIL",
+        "UPDATE_PASSWORD"
+      ]
+    },
+    "elevenlabs": {
+      "api_key": "$ELEVENLABS_API_KEY"
+    },
+    "deepgram": {
+      "api_key": "$DEEPGRAM_API_KEY"
+    },
+    "cartesia": {
+      "api_key": "$CARTESIA_API_KEY"
+    },
+    "openai": {
+      "api_key": "$OPENAI_API_KEY",
+      "base_url": "$OPENAI_BASE_URL"
+    },
+    "datasync": {
+      "url": "$DATASYNC_URL",
+      "api_key": "$DATASYNC_API_KEY",
+      "customer_name": "$DATASYNC_CUSTOMER_NAME",
+      "username": "$DATASYNC_USERNAME",
+      "password": "$DATASYNC_PASSWORD"
+    },
+    "callqa": {
+      "url": "$AVA_ANALYTICS_ENGINE_URL"
+    }
+  }

@@ -1,0 +1,82 @@
+syntax = "proto3";
+ 
+package chat;
+ 
+service ChatService {
+    rpc StreamMessages (ChatRequest) returns (stream ChatResponse);
+}
+ 
+message Metadata {
+    string user_no = 1;
+    string bot_no = 2;
+    string email_id = 3;
+    string bot_id = 4;
+    string bot_name = 5;
+    string campaign_id = 6;
+    string call_direction = 7;
+    // Add other fields as needed
+}
+ 
+message Content {
+    enum ContentType {
+        TEXT = 0;
+        BUTTON = 1;
+        FORM = 2;
+        IMAGE = 3;
+        AUDIO = 4;
+        LOCATION = 5;
+        // Add other content types as needed
+    }
+ 
+    ContentType type = 1;
+    string message = 2;
+    string form = 3;
+    string image = 4;
+    string audio = 5;
+    string location = 6;
+    // Add other content fields as needed
+}
+ 
+message Action {
+    enum ActionType {
+        HANGUP = 0;
+        ATC = 1;
+        AQN = 2;
+        TRUNK_TRANSFER = 3;
+        BOT_TRANSFER = 4;
+        NoAction = 5;
+        IVR_TRAV = 6;
+        // Add other action types as needed
+    }
+ 
+    ActionType type = 1;
+    string uri = 2;
+}
+ 
+message MetadataResponse {
+    string disposition = 1;
+    string SPEECH_DTMF_MAXLEN = 2;
+    // Add other metadata fields as needed
+}
+ 
+message ChatRequest {
+    string unique_id = 1;
+    string tenant_id = 2;
+    string message = 3;
+    Metadata metadata = 4;
+    string language = 5;
+    // Optional dynamic dictionary
+    string dynamic_data = 6;
+}
+ 
+message ChatResponse {
+    string channel_id = 1;
+    string unique_id = 2;
+    string tenant_id = 3;
+    string language = 4;
+    repeated Content content = 5;
+    Action action = 6;
+    MetadataResponse metadata = 7;
+    // Optional dynamic dictionary
+    string dynamic_data = 8;
+}

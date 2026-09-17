@@ -1,0 +1,8 @@
+# dependencies
+/node_modules
+package-lock.json
+/common/config/development.json
+/common/config/sample.json
+/common/config/creds.json
+.DS_Store
+force-ipv4-dns.js
