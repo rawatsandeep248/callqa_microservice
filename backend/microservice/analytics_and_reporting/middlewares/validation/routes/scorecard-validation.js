@@ -49,8 +49,10 @@ class ScorecardValidation {
         await param('id')
             .notEmpty()
             .withMessage('id is required')
-            .isMongoId()
-            .withMessage('id must be a valid MongoDB ObjectId')
+            .isString()
+            .withMessage('id must be a string')
+            .isLength({ min: 1, max: 64 })
+            .withMessage('id must be between 1 and 64 characters')
             .run(req);
 
         CommonUtil.errorChecker(req, res, next);

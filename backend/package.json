@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "dev": " nodemon main.js",
-    "start": "nodemon main.js"
+    "start": "nodemon main.js",
+    "postgres:migrate": "NODE_ENV=development node scripts/run-postgres-migration.js",
+    "postgres:migrate-two-table": "NODE_ENV=development node scripts/migrate-to-two-table-schema.js",
+    "postgres:import-mongo": "NODE_ENV=development node scripts/migrate-scorecards-mongo-to-postgres.js",
+    "postgres:import-dropdowns": "NODE_ENV=development node scripts/migrate-dropdown-configs-mongo-to-postgres.js"
   },
   "jest": {
     "collectCoverage": true
@@ -58,6 +62,7 @@
     "nodemailer": "8.0.7",
     "nodemon": "3.1.14",
     "openai": "6.27.0",
+    "pg": "^8.23.0",
     "rand-token": "1.0.1",
     "redis": "4.6.13",
     "replaceall": "0.1.6",
