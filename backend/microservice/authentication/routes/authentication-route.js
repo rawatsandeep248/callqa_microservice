@@ -62,6 +62,13 @@ router.get(
   RBACMIDDLEWAREINST(["Usermanagement","Worker Assist/WA Users","Agent Assist/Users Management"]),
   AUTHENTICATIONCONTROLLERINST.getUserByID
 );
+
+router.get(
+  "/user-tenant/:email",
+  JWTMIDDLEWAREINST.checkJwt,
+  RBACMIDDLEWAREINST(["Usermanagement"]),
+  AUTHENTICATIONCONTROLLERINST.getUserTenantMapping
+);
 //here
 router.delete(
   "/",

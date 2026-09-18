@@ -2,7 +2,7 @@ const KeycloakAdminUtil = require("../../../common/utils/keycloak-admin-util");
 const UserRepository = require("../repository/user-repository");
 const TenantRepository = require("../repository/tenant-repository");
 
-const SUPER_ADMIN_ROLES = new Set(["super_admin", "SUPER_ADMIN"]);
+const PLATFORM_ADMIN_ROLES = new Set(["ava_admin", "super_admin", "SUPER_ADMIN"]);
 
 function normalizeRoles(roles) {
     if (Array.isArray(roles)) {
@@ -14,8 +14,17 @@ function normalizeRoles(roles) {
     return [];
 }
 
-function isSuperAdminRole(roles) {
-    return normalizeRoles(roles).some((role) => SUPER_ADMIN_ROLES.has(role));
+function isPlatformAdminRole(roles) {
+    return normalizeRoles(roles).some((role) => PLATFORM_ADMIN_ROLES.has(role));
+}
+
+/** Tenant-scoped app users must have a row in common_db.users (Keycloak does not store tenant_id). */
+function requiresTenantDbRecord(roles) {
+    const normalized = normalizeRoles(roles);
+    if (!normalized.length) {
+        return false;
+    }
+    return !isPlatformAdminRole(normalized);
 }
 
 class AdminUserService {
@@ -24,6 +33,14 @@ class AdminUserService {
         this.keycloakAdmin = new KeycloakAdminUtil(config);
         this.userRepository = new UserRepository();
         this.tenantRepository = new TenantRepository();
+    }
+
+    requiresTenantDbRecord(roles) {
+        return requiresTenantDbRecord(roles);
+    }
+
+    isPlatformAdminRole(roles) {
+        return isPlatformAdminRole(roles);
     }
 
     async createTenantUser({ tenantId, email, name, password, role }) {
@@ -40,14 +57,14 @@ class AdminUserService {
             name,
             password,
             role,
-            tenantId,
+            tenantId: null,
         });
 
         const user = await this.userRepository.create({
             userId: keycloakUser.id,
             email,
             tenantId,
-            role: role || "QA_ANALYST",
+            role: role || "tenant_admin",
         });
 
         return { user, keycloakUserId: keycloakUser.id };
@@ -70,20 +87,29 @@ class AdminUserService {
     }
 
     /**
-     * Resolves tenant / super-admin context during keycloak-login.
+     * Resolves tenant context during keycloak-login and /auth/me.
+     * common_db.users is the source of truth for tenant_id (not Keycloak attributes).
      */
     async resolveLoginContext(email, roles) {
         const keycloakRoles = normalizeRoles(roles);
+        const normalizedEmail = (email || "").trim().toLowerCase();
 
-        if (isSuperAdminRole(keycloakRoles)) {
+        if (isPlatformAdminRole(keycloakRoles)) {
             return {
                 is_super_admin: true,
-                role: Array.from(new Set([...keycloakRoles, "super_admin"])),
+                role: Array.from(new Set([...keycloakRoles, "ava_admin"])),
             };
         }
 
-        const context = await this.getUserContextByEmail(email);
+        const context = await this.getUserContextByEmail(normalizedEmail);
         if (!context) {
+            if (requiresTenantDbRecord(keycloakRoles)) {
+                const err = new Error(
+                    "User account is not linked to a tenant. Contact your administrator."
+                );
+                err.code = "TENANT_NOT_PROVISIONED";
+                throw err;
+            }
             return {
                 is_super_admin: false,
                 role: keycloakRoles,
@@ -93,6 +119,12 @@ class AdminUserService {
         const mergedRoles = Array.from(
             new Set([...keycloakRoles, context.role].filter(Boolean))
         );
+
+        if (context.tenant_status && context.tenant_status !== "ACTIVE") {
+            const err = new Error(`Tenant is not active: ${context.tenant_status}`);
+            err.code = "TENANT_INACTIVE";
+            throw err;
+        }
 
         return {
             user_id: context.user_id,
@@ -107,6 +139,38 @@ class AdminUserService {
 
     async listUsersByTenant(tenantId) {
         return this.userRepository.findByTenantId(tenantId);
+    }
+
+    async getTenantMappingByEmail(email) {
+        return this.getUserContextByEmail(email);
+    }
+
+    async linkUserToTenant({ email, tenantId, role, keycloakUserId }) {
+        if (!tenantId) {
+            throw new Error("tenant_id is required");
+        }
+        const tenant = await this.tenantRepository.findById(tenantId);
+        if (!tenant) {
+            throw new Error(`Tenant not found: ${tenantId}`);
+        }
+        if (tenant.status !== "ACTIVE") {
+            throw new Error(`Tenant is not active: ${tenant.status}`);
+        }
+
+        let userId = keycloakUserId;
+        if (!userId) {
+            const users = await this.keycloakAdmin.findUserByEmail(email);
+            userId = users[0]?.id;
+        }
+        if (!userId) {
+            throw new Error("Keycloak user not found for tenant linking");
+        }
+        return this.userRepository.upsert({
+            userId,
+            email,
+            tenantId,
+            role: role || "tenant_admin",
+        });
     }
 }
 

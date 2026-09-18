@@ -29,7 +29,7 @@ class TenantController {
                 });
             }
 
-            const createdBy = req.userEmail || req.body.created_by || "super_admin";
+            const createdBy = req.userEmail || req.body.created_by || "ava_admin";
             const result = await this.provisioningService.provisionTenant({
                 tenantId: tenant_id,
                 displayName: display_name,

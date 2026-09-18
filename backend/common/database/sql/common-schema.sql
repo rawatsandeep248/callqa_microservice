@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id       VARCHAR(255)  PRIMARY KEY,
     email         VARCHAR(255)  UNIQUE NOT NULL,
     tenant_id     VARCHAR(64)   NOT NULL REFERENCES tenants (tenant_id),
-    role          VARCHAR(50)   NOT NULL DEFAULT 'QA_ANALYST',
+    role          VARCHAR(50)   NOT NULL DEFAULT 'tenant_admin',
     is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()

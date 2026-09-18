@@ -39,7 +39,7 @@ const ACCESS_CONFIG = {
   "Reports/AVA QC": ["ava_admin", "admin", "ava_teamlead", "wa_sme", "wa_admin", "ava_qa"],
   "Report/TrendsApp": ["ava_super_analyst", "ava_analyst", "ava_qa"],
 
-  "Scorecard/Management": ["ava_admin", "admin", "ava_teamlead"],
+  "Scorecard/Management": ["ava_admin", "admin", "ava_teamlead", "tenant_admin"],
 
   "Disposition/Management": ["ava_admin", "admin", "ava_teamlead", "wa_admin", "wa_sme","ava_qa"],
   "Common/Authenticated": ["ava_admin", "admin", "ava_teamlead", "wa_sme", "wa_admin", "wa_user", "ava_qa"],

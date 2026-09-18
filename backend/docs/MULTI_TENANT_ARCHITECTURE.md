@@ -36,8 +36,9 @@
                     ↑ auth via
 ┌──────────────────────────────────────────────────────────────┐
 │                     Keycloak                                  │
-│  • super_admin realm / role                                   │
-│  • tenant users with tenant_id custom attribute              │
+│  • ava_admin role (platform tenant management)                │
+│  • tenant-scoped roles (e.g. tenant_admin) — role attribute   │
+│    only; tenant_id is NOT stored in Keycloak                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,17 +54,16 @@ CREATE TABLE tenants (
     db_name       VARCHAR(255)  UNIQUE NOT NULL,   -- e.g. "callqa_tenant_orprd_cai"
     status        VARCHAR(20)   NOT NULL DEFAULT 'ACTIVE',
                   -- ACTIVE | SUSPENDED | DELETED
-    created_by    VARCHAR(255)  NOT NULL,           -- super admin email
+    created_by    VARCHAR(255)  NOT NULL,           -- AVA admin email
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
--- Maps every user → their tenant
--- (source of truth for "which DB do I connect to?")
+-- Maps every tenant-scoped user → their tenant (source of truth for tenant_id)
 CREATE TABLE users (
     user_id       VARCHAR(255)  PRIMARY KEY,   -- Keycloak user ID
     email         VARCHAR(255)  UNIQUE NOT NULL,
     tenant_id     VARCHAR(64)   NOT NULL REFERENCES tenants(tenant_id),
-    -- role          VARCHAR(50)   NOT NULL,      -- e.g. ADMIN, AGENT, QA_ANALYST
+    role          VARCHAR(50),                   -- e.g. tenant_admin (merged with Keycloak role at login)
     is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
@@ -87,23 +87,23 @@ CREATE TABLE provisioning_jobs (
 
 ## Full Flow
 
-### 1. Super Admin Signup & Login
+### 1. AVA Admin Signup & Login
 
 ```
-Super Admin Signup
+AVA Admin Signup
       │
-      ├─► Keycloak: create user with role = "super_admin"
-      └─► common_db: record email (for audit)
+      ├─► Keycloak: create user with role = "ava_admin"
+      └─► common_db: record email (for audit, optional for platform admins)
 
-Super Admin Login
+AVA Admin Login
       │
-      ├─► Keycloak: authenticate → JWT with role = "super_admin"
-      └─► Frontend: role = super_admin → redirect to Tenant Management screen
+      ├─► Keycloak: authenticate → JWT with role = "ava_admin"
+      └─► Frontend: platform admin → redirect to Tenant Management screen
 ```
 
 ---
 
-### 2. Tenant Creation (Super Admin action)
+### 2. Tenant Creation (AVA Admin action)
 
 ```
 POST /admin/tenants  { tenant_id, display_name }
@@ -121,15 +121,20 @@ POST /admin/tenants  { tenant_id, display_name }
 
 ---
 
-### 3. User Creation (Super Admin action)
+### 3. User Creation (AVA Admin action)
 
 ```
 POST /admin/tenants/:tenant_id/users  { email, role, name }
       │
-      ├─► Keycloak API: create user
-      │   + set custom attribute: tenant_id = "tenant_orprd_cai"
+      ├─► Keycloak API: create user (role attribute only)
       │
-      └─► common_db.users: INSERT { keycloak_user_id, email, tenant_id, role }
+      └─► common_db.users: INSERT/UPSERT { user_id, email, tenant_id, role }
+          (required — login fails with TENANT_NOT_PROVISIONED if missing)
+
+POST/PATCH /authentication  (Users UI)
+      │
+      ├─► Keycloak create/update (no tenant_id attribute)
+      └─► linkUserToTenant → common_db.users (mandatory for non–platform-admin roles)
 ```
 
 ---
@@ -144,7 +149,7 @@ User Login
       │   → user object includes tenant_id, is_super_admin, etc.
       │
       └─► Frontend stores in session:
-              { token: "jwt...", tenant_id: "tenant_orprd_cai", role: "QA_ANALYST" }
+              { token: "jwt...", tenant_id: "tenant_orprd_cai", role: "tenant_admin" }
 
 
 Every subsequent API call
@@ -293,7 +298,7 @@ async function provisionTenant({ tenantId, displayName, createdBy }) {
 
 ---
 
-## Super Admin API Endpoints
+## AVA Admin API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -304,7 +309,7 @@ async function provisionTenant({ tenantId, displayName, createdBy }) {
 | POST | `/admin/tenants/:id/users` | Create user (Keycloak + common_db) |
 | GET | `/admin/tenants/:id/users` | List users for a tenant |
 
-All super admin routes are protected by a separate JWT role check (`super_admin`).
+All platform tenant routes are protected by JWT role check (`ava_admin`; legacy `super_admin` accepted during migration).
 
 ---
 
@@ -326,7 +331,7 @@ callqa_microservice/backend/
 │       └── tenant-resolver.js             ← tenant_id → req.tenantDb
 │
 ├── microservice/
-│   ├── admin/                              ← Super admin only
+│   ├── admin/                              ← AVA admin (platform) only
 │   │   ├── routes/admin-route.js
 │   │   ├── controller/
 │   │   │   ├── tenant-controller.js        ← create/list/suspend tenants
@@ -427,14 +432,14 @@ npm run postgres:migrate-tenants
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/agentic/admin/api/v1/auth/me` | JWT | Returns tenant_id for normal users or super_admin flag |
-| POST | `/agentic/admin/api/v1/tenants` | Super admin | Create tenant + provision DB |
-| GET | `/agentic/admin/api/v1/tenants` | Super admin | List tenants |
-| GET | `/agentic/admin/api/v1/tenants/:tenant_id` | Super admin | Tenant detail |
-| PATCH | `/agentic/admin/api/v1/tenants/:tenant_id/suspend` | Super admin | Suspend tenant |
-| PATCH | `/agentic/admin/api/v1/tenants/:tenant_id/activate` | Super admin | Activate tenant |
-| GET | `/agentic/admin/api/v1/tenants/:tenant_id/provisioning` | Super admin | Provisioning job status |
-| POST | `/agentic/admin/api/v1/tenants/:tenant_id/users` | Super admin | Create user (Keycloak + common_db) |
-| GET | `/agentic/admin/api/v1/tenants/:tenant_id/users` | Super admin | List tenant users |
+| GET | `/agentic/admin/api/v1/auth/me` | JWT | Returns tenant_id for normal users or platform-admin flag |
+| POST | `/agentic/admin/api/v1/tenants` | AVA admin | Create tenant + provision DB |
+| GET | `/agentic/admin/api/v1/tenants` | AVA admin | List tenants |
+| GET | `/agentic/admin/api/v1/tenants/:tenant_id` | AVA admin | Tenant detail |
+| PATCH | `/agentic/admin/api/v1/tenants/:tenant_id/suspend` | AVA admin | Suspend tenant |
+| PATCH | `/agentic/admin/api/v1/tenants/:tenant_id/activate` | AVA admin | Activate tenant |
+| GET | `/agentic/admin/api/v1/tenants/:tenant_id/provisioning` | AVA admin | Provisioning job status |
+| POST | `/agentic/admin/api/v1/tenants/:tenant_id/users` | AVA admin | Create user (Keycloak + common_db) |
+| GET | `/agentic/admin/api/v1/tenants/:tenant_id/users` | AVA admin | List tenant users |
 
 Scorecard APIs require `Authorization: Bearer <jwt>` and `X-Tenant-Id: <tenant_id>` header.

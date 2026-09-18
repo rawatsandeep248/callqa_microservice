@@ -38,7 +38,7 @@ class KeycloakAdminUtil {
             emailVerified: true,
             firstName: name || email.split("@")[0],
             attributes: {
-                tenant_id: [tenantId],
+                type: ["user"],
             },
             credentials: [
                 {
@@ -51,6 +51,9 @@ class KeycloakAdminUtil {
 
         if (role) {
             payload.attributes.role = [role];
+        }
+        if (tenantId) {
+            payload.attributes.tenant_id = [tenantId];
         }
 
         const url = `${this.config.get("keycloak:url")}/admin/realms/${this.config.get("keycloak:realm")}/users`;

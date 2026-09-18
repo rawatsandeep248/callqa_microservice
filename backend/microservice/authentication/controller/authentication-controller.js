@@ -86,6 +86,9 @@ class AuthenticationController {
     this.getConfigValueThoughKeyName = this.getConfigValueThoughKeyName.bind(this);
     this.createconfigValue = this.createconfigValue.bind(this);
     this.forgotPasswordController = this.forgotPasswordController.bind(this);
+    this.getUserTenantMapping = this.getUserTenantMapping.bind(this);
+    this.uploadLogo = this.uploadLogo.bind(this);
+    this.fetchLogo = this.fetchLogo.bind(this);
   }
 
   async transactionOperation(type, connection) {
@@ -117,22 +120,57 @@ class AuthenticationController {
     return;
   }
 
+  _extractKeycloakUserIdFromCreateResponse(response) {
+    const location =
+      response?.headers?.location ||
+      response?.headers?.Location ||
+      response?.header?.location;
+    if (!location) {
+      return null;
+    }
+    const parts = String(location).split("/");
+    return parts[parts.length - 1] || null;
+  }
+
+  async _deleteKeycloakUserById(accessToken, keycloakUserId) {
+    if (!keycloakUserId) {
+      return;
+    }
+    const options = {
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + accessToken,
+      },
+    };
+    const url = `${this.config.get("keycloak:url")}/admin/realms/${this.config.get("keycloak:realm")}/users/${keycloakUserId}`;
+    await this.restUtil.deleteRequest(url, options);
+  }
+
   async createUser(req, res, next) {
     let user = req.body.user
     try {
       let token = await this.OauthUtil.getKeycoakAccessToken();
       if (token && token.access_token) {
+        const role = user.role;
+        const needsTenantRow = this.adminUserService.requiresTenantDbRecord([role]);
+        if (needsTenantRow && !user.tenant_id) {
+          return res.status(400).json({
+            response: "FAILED",
+            error: { message: "tenant_id is required for this role", code: 400 },
+          });
+        }
+
+        const attributes = {
+          role: [String(role)],
+          type: ["user"],
+        };
         let data = {
           username: user.email,
           email: user.email,
           enabled: true,
           firstName: user.name.split(' ')[0],
           lastName: user.name.split(' ')?.[1] || '',
-          attributes: {
-            role: user.role.toString(),
-            type: "user",
-            
-          },
+          attributes,
           credentials: [
             {
               type: "password",
@@ -150,6 +188,30 @@ class AuthenticationController {
         let url = `${this.config.get("keycloak:url")}/admin/realms/${this.config.get('keycloak:realm')}/users`;
         const response = await this.restUtil.postRequest(url, data, options);
         if (response.status == 201) {
+          const keycloakUserId = this._extractKeycloakUserIdFromCreateResponse(response);
+          if (needsTenantRow) {
+            try {
+              await this.adminUserService.linkUserToTenant({
+                email: user.email,
+                tenantId: user.tenant_id,
+                role,
+                keycloakUserId,
+              });
+            } catch (linkErr) {
+              try {
+                await this._deleteKeycloakUserById(token.access_token, keycloakUserId);
+              } catch (rollbackErr) {
+                console.error("[createUser] Keycloak rollback failed:", rollbackErr.message);
+              }
+              return res.status(500).json({
+                response: "FAILED",
+                error: {
+                  message: linkErr.message || "Failed to link user to tenant in common database",
+                  code: 500,
+                },
+              });
+            }
+          }
           res.created({}, MESSAGEUTIL.response().SUCCESSFULLY_CREATED);
         } else {
           res.forbidden(MESSAGEUTIL.response().FAILED_USER_CREATION)
@@ -243,14 +305,23 @@ class AuthenticationController {
       let token = await this.OauthUtil.getKeycoakAccessToken();
       let user = req.body.user;
       if (token && token.access_token) {
+        const role = user.role;
+        const needsTenantRow = this.adminUserService.requiresTenantDbRecord([role]);
+        if (needsTenantRow && !user.tenant_id) {
+          return res.status(400).json({
+            response: "FAILED",
+            error: { message: "tenant_id is required for this role", code: 400 },
+          });
+        }
+
         let data = {
           email: user.email,
           enabled: user.status == 'ACTIVE' ? true : false,
           firstName: user.name.split(' ')[0],
           lastName: user.name.split(' ')?.[1] || '',
           attributes: {
-            role: user.role,
-            type: "user"
+            role: [String(role)],
+            type: ["user"],
           },
         };
         let options = {
@@ -262,6 +333,24 @@ class AuthenticationController {
 
         let url = `${this.config.get("keycloak:url")}/admin/realms/${this.config.get('keycloak:realm')}/users/` + user.id;
         await this.restUtil.putRequest(url, data, options);
+        if (needsTenantRow && user.tenant_id) {
+          try {
+            await this.adminUserService.linkUserToTenant({
+              email: user.email,
+              tenantId: user.tenant_id,
+              role,
+              keycloakUserId: user.id,
+            });
+          } catch (linkErr) {
+            return res.status(500).json({
+              response: "FAILED",
+              error: {
+                message: linkErr.message || "Failed to link user to tenant in common database",
+                code: 500,
+              },
+            });
+          }
+        }
         res.success({}, MESSAGEUTIL.response().SUCCESSFULLY_UPDATED);
       }
       else {
@@ -269,6 +358,28 @@ class AuthenticationController {
       }
     } catch (error) {
       next(error)
+    }
+  }
+
+  async getUserTenantMapping(req, res, next) {
+    try {
+      const email = (req.params.email || "").trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({
+          response: "FAILED",
+          error: { message: "email is required", code: 400 },
+        });
+      }
+      const mapping = await this.adminUserService.getTenantMappingByEmail(email);
+      res.success(
+        {
+          tenant_id: mapping?.tenant_id || null,
+          role: mapping?.role || null,
+        },
+        MESSAGEUTIL.response().SUCCESSFULLY_FETCHED
+      );
+    } catch (error) {
+      next(error);
     }
   }
 
@@ -647,6 +758,18 @@ class AuthenticationController {
           keycloakRoles
         );
       } catch (contextErr) {
+        if (
+          contextErr.code === "TENANT_NOT_PROVISIONED" ||
+          contextErr.code === "TENANT_INACTIVE"
+        ) {
+          return res.status(403).json({
+            response: "FAILED",
+            error: {
+              message: contextErr.message,
+              code: contextErr.code,
+            },
+          });
+        }
         console.warn("[keycloakLogin] tenant context lookup failed:", contextErr.message);
       }
 

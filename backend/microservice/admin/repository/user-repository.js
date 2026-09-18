@@ -29,6 +29,31 @@ class UserRepository {
         );
         return rows;
     }
+
+    async upsert({ userId, email, tenantId, role }) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const { rows: existing } = await query(
+            `SELECT user_id FROM users WHERE email = $1`,
+            [normalizedEmail]
+        );
+        if (existing[0]) {
+            const { rows } = await query(
+                `UPDATE users
+                 SET tenant_id = $2, role = $3, user_id = COALESCE($4, user_id), is_active = TRUE
+                 WHERE email = $1
+                 RETURNING *`,
+                [normalizedEmail, tenantId, role, userId || null]
+            );
+            return rows[0];
+        }
+        const { rows } = await query(
+            `INSERT INTO users (user_id, email, tenant_id, role)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [userId, normalizedEmail, tenantId, role]
+        );
+        return rows[0];
+    }
 }
 
 module.exports = UserRepository;

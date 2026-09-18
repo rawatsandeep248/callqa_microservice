@@ -19,10 +19,27 @@ class AuthContextController {
                 });
             }
 
-            const context = await this.adminUserService.resolveLoginContext(
-                email ? email.trim().toLowerCase() : "",
-                role
-            );
+            let context;
+            try {
+                context = await this.adminUserService.resolveLoginContext(
+                    email ? email.trim().toLowerCase() : "",
+                    role
+                );
+            } catch (contextErr) {
+                if (
+                    contextErr.code === "TENANT_NOT_PROVISIONED" ||
+                    contextErr.code === "TENANT_INACTIVE"
+                ) {
+                    return res.status(403).json({
+                        response: "FAILED",
+                        error: {
+                            message: contextErr.message,
+                            code: contextErr.code,
+                        },
+                    });
+                }
+                throw contextErr;
+            }
 
             if (!context.is_super_admin && !context.tenant_id) {
                 return res.status(404).json({

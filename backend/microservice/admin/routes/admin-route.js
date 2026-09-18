@@ -19,7 +19,7 @@ router.use(attachUserFromToken);
 // Available to any authenticated user (returns tenant_id for normal users)
 router.get("/auth/me", AUTHCONTEXTCONTROLLER.getMe);
 
-// Super admin only
+// AVA admin (platform tenant management) only
 router.use(superAdminAuthMiddleware);
 
 router.post("/tenants", TENANTCONTROLLER.createTenant);
