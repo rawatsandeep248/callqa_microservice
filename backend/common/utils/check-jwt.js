@@ -39,7 +39,9 @@ class JwtMiddleware {
             // console.log("req.headers['rbac_role']", req.headers['rbac_role']);
             const decoded = Jwt.decode(result);
             // console.log("decoded", decoded);
-            req.role = decoded.role;
+            req.role = decoded?.role || decoded?.attributes?.role?.[0];
+            req.userEmail = decoded?.email || decoded?.preferred_username;
+            req.userId = decoded?.sub;
             next();
           }
         })

@@ -17,11 +17,13 @@ const { unlink, stat } = require("fs");
 const REDISSERVICE = require("../../../common/database/test-redis.js");
 const axios = require("axios");
 const qs = require("qs");
+const AdminUserService = require("../../admin/service/admin-user-service");
 
 class AuthenticationController {
   constructor(config) {
     this.config = config;
     this.authService = new AUTHENTICATIONSERVICE(config);
+    this.adminUserService = new AdminUserService(config);
     this.restUtil = new RestUtil();
     this.OauthUtil = new OauthUtil(config);
     this.CommonUtil = new CommonUtil(config);
@@ -635,11 +637,24 @@ class AuthenticationController {
       req.params['id'] = userInfoResponse.sub || userInfoResponse.id;
       let userMetaInfo = await this.getUserByID(req, res, next);
 
-      userInfoResponse.tenant_id = this.config.get("database:name");
+      const keycloakRoles =
+        userMetaInfo && userMetaInfo.attributes ? userMetaInfo.attributes.role : undefined;
+
+      let loginContext = { is_super_admin: false, role: keycloakRoles };
+      try {
+        loginContext = await this.adminUserService.resolveLoginContext(
+          (userInfoResponse.email || username || "").trim().toLowerCase(),
+          keycloakRoles
+        );
+      } catch (contextErr) {
+        console.warn("[keycloakLogin] tenant context lookup failed:", contextErr.message);
+      }
+
       const userWithRoles = {
         ...userInfoResponse,
-        role: userMetaInfo && userMetaInfo.attributes ? userMetaInfo.attributes.role : undefined,
-        ...userMetaInfo
+        ...userMetaInfo,
+        ...loginContext,
+        role: loginContext.role || keycloakRoles,
       };
 
       return res.success(

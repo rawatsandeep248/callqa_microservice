@@ -1,11 +1,12 @@
 const { Pool } = require("pg");
 const CONFIG = require("../utils/config-util");
+const { getTenantPoolFromContext } = require("./tenant-context");
 
-let pool = null;
+let defaultPool = null;
 
-function getPool() {
-    if (!pool) {
-        pool = new Pool({
+function getDefaultPool() {
+    if (!defaultPool) {
+        defaultPool = new Pool({
             host: CONFIG.get("postgres:host") || "localhost",
             port: parseInt(CONFIG.get("postgres:port") || "5432", 10),
             database: CONFIG.get("postgres:database") || "callqa_dev",
@@ -15,7 +16,15 @@ function getPool() {
             idleTimeoutMillis: 30000,
         });
     }
-    return pool;
+    return defaultPool;
+}
+
+function getPool() {
+    const tenantPool = getTenantPoolFromContext();
+    if (tenantPool) {
+        return tenantPool;
+    }
+    return getDefaultPool();
 }
 
 async function query(text, params) {
@@ -37,4 +46,4 @@ async function withTransaction(fn) {
     }
 }
 
-module.exports = { getPool, query, withTransaction };
+module.exports = { getPool, getDefaultPool, query, withTransaction };

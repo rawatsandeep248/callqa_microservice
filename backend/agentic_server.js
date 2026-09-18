@@ -26,7 +26,8 @@ global.mongoObject = {}
 /******************* ROUTES IMPORTS ***************************/
 
 const { AUTHENTICATION } = require("./microservice/authentication/routes");
-const {  SCORECARDROUTE } = require("./microservice/analytics_and_reporting/routes");
+const { SCORECARDROUTE } = require("./microservice/analytics_and_reporting/routes");
+const { ADMINROUTE } = require("./microservice/admin/routes");
 
 // GOOGLE TTS credentials path configuration
 let CREDENTIALS_PATH;
@@ -163,6 +164,8 @@ function configur_parser() {
 function configur_routes() {
   // authentication microservice routes
   app.use("/agentic/auth/api/v1/authentication", AUTHENTICATION);
+  // admin / multi-tenant routes
+  app.use("/agentic/admin/api/v1", ADMINROUTE);
   // report microservice routes
   app.use("/agentic/reporting/api/v1/scorecard", SCORECARDROUTE);
 

@@ -8,8 +8,10 @@ const SCORECARDVALIDATIONINST = new ScorecardValidation();
 const JwtMiddleware = require("../../../common/utils/check-jwt");
 const JWTMIDDLEWAREINST = new JwtMiddleware();
 const RBACMIDDLEWAREINST = require("../../../common/middlewares/rbac-handler");
+const tenantResolverMiddleware = require("../../../common/middlewares/tenant-resolver");
 
-// router.use(JWTMIDDLEWAREINST.checkJwt);
+router.use(JWTMIDDLEWAREINST.checkJwt);
+router.use(tenantResolverMiddleware);
 // router.use(RBACMIDDLEWAREINST(["Scorecard/Management"]));
 
 // Scorecard CRUD
