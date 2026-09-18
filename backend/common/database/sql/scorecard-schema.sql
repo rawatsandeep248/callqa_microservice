@@ -1,9 +1,9 @@
--- Scorecard PostgreSQL schema (2-table design)
+-- Scorecard PostgreSQL schema (2-table design, stable IDs across versions)
 -- scorecards: header + embedded sections JSONB (question_id references)
--- scorecard_questions: full question documents per scorecard version
+-- scorecard_questions: full question documents per (scorecard_id, scorecard_version)
 
 CREATE TABLE IF NOT EXISTS scorecards (
-    scorecard_id        VARCHAR(64)  PRIMARY KEY,
+    scorecard_id        VARCHAR(64)  NOT NULL,
     lineage_id          VARCHAR(64)  NOT NULL,
     version             INTEGER      NOT NULL,
     name                VARCHAR(500) NOT NULL,
@@ -35,18 +35,20 @@ CREATE TABLE IF NOT EXISTS scorecards (
     updated_by          VARCHAR(255) NOT NULL,
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    UNIQUE (lineage_id, version)
+    PRIMARY KEY (scorecard_id, version)
 );
 
-CREATE INDEX IF NOT EXISTS idx_scorecards_lineage_version ON scorecards (lineage_id, version DESC);
+CREATE INDEX IF NOT EXISTS idx_scorecards_id_version_desc ON scorecards (scorecard_id, version DESC);
 CREATE INDEX IF NOT EXISTS idx_scorecards_status ON scorecards (status);
 CREATE INDEX IF NOT EXISTS idx_scorecards_channels ON scorecards USING GIN (channels);
--- idx_scorecards_sections is created in migrate-to-two-table-schema.sql (after sections column exists)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scorecards_one_draft_per_id
+    ON scorecards (scorecard_id) WHERE status = 'DRAFT';
 
 CREATE TABLE IF NOT EXISTS scorecard_questions (
-    question_id           VARCHAR(64)  PRIMARY KEY,
+    question_id           VARCHAR(64)  NOT NULL,
     question_lineage_id   VARCHAR(64)  NOT NULL,
-    scorecard_id          VARCHAR(64)  NOT NULL REFERENCES scorecards (scorecard_id) ON DELETE CASCADE,
+    scorecard_id          VARCHAR(64)  NOT NULL,
+    scorecard_version     INTEGER      NOT NULL,
     scorecard_lineage_id  VARCHAR(64)  NOT NULL,
     section_id            VARCHAR(64)  NOT NULL,
     section_lineage_id    VARCHAR(64)  NOT NULL,
@@ -66,10 +68,15 @@ CREATE TABLE IF NOT EXISTS scorecard_questions (
     created_by            VARCHAR(255) NOT NULL,
     updated_by            VARCHAR(255) NOT NULL,
     created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    updated_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (scorecard_id, scorecard_version, question_id),
+    FOREIGN KEY (scorecard_id, scorecard_version)
+        REFERENCES scorecards (scorecard_id, version) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_questions_scorecard ON scorecard_questions (scorecard_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_questions_scorecard_version_seq
+    ON scorecard_questions (scorecard_id, scorecard_version, sequence);
+CREATE INDEX IF NOT EXISTS idx_questions_question_id ON scorecard_questions (question_id);
 CREATE INDEX IF NOT EXISTS idx_questions_lineage ON scorecard_questions (question_lineage_id);
 
 CREATE TABLE IF NOT EXISTS scorecard_audit_logs (
@@ -92,8 +99,8 @@ CREATE TABLE IF NOT EXISTS scorecard_audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_scorecard ON scorecard_audit_logs (scorecard_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_lineage ON scorecard_audit_logs (scorecard_lineage_id, created_at DESC);
-
--- Platform dropdown configs (Channel / State admin-editable lists per module)
+CREATE INDEX IF NOT EXISTS idx_audit_scorecard_version
+    ON scorecard_audit_logs (scorecard_id, scorecard_version, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS platform_dropdown_configs (
     id           VARCHAR(64)  PRIMARY KEY,

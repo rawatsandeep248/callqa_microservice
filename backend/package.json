@@ -10,6 +10,7 @@
     "postgres:migrate-common": "NODE_ENV=development node scripts/run-common-migration.js",
     "postgres:migrate-tenants": "NODE_ENV=development node scripts/migrate-all-tenants.js",
     "postgres:migrate-two-table": "NODE_ENV=development node scripts/migrate-to-two-table-schema.js",
+    "postgres:migrate-stable-ids": "NODE_ENV=development node scripts/migrate-stable-scorecard-ids.js",
     "postgres:import-mongo": "NODE_ENV=development node scripts/migrate-scorecards-mongo-to-postgres.js",
     "postgres:import-dropdowns": "NODE_ENV=development node scripts/migrate-dropdown-configs-mongo-to-postgres.js"
   },

@@ -38,8 +38,8 @@ Benefits:
 
 | ID | Scope | Purpose |
 |---|---|---|
-| `scorecard_id` | One per version | Primary key. All runtime systems (scoring, audit, test runs) reference this. |
-| `lineage_id` | Stable across versions | Groups v1, v2, v3 of the same logical scorecard. |
+| `scorecard_id` | Stable across versions | Logical scorecard id (QA config). Primary key with `version`. |
+| `lineage_id` | Same as `scorecard_id` | Kept for backward compatibility; equals `scorecard_id` on create. |
 | `section_id` | One per section record | Unique within a scorecard version. Changes on clone/import. |
 | `section_lineage_id` | Stable across versions | Tracks the same logical section across versions and audit. |
 | `question_id` | One per question record | Unique globally. Referenced in `sections[].questions[]`. |
@@ -92,9 +92,9 @@ One row = one **version** of a scorecard. Sections are embedded as JSONB.
 
 | Column | Type | Required | Description |
 |---|---|---|---|
-| `scorecard_id` | VARCHAR(64) | PK | UUID. Unique per version. |
-| `lineage_id` | VARCHAR(64) | Yes | Stable ID across all versions of this scorecard. |
-| `version` | INTEGER | Yes | Starts at 1. Increments on draft clone. Unique per `(lineage_id, version)`. |
+| `scorecard_id` | VARCHAR(64) | PK (with `version`) | Stable logical id. |
+| `lineage_id` | VARCHAR(64) | Yes | Same value as `scorecard_id` for new scorecards. |
+| `version` | INTEGER | PK (with `scorecard_id`) | Starts at 1. Increments on draft. |
 | `name` | VARCHAR(500) | Yes | Display name. |
 | `description` | TEXT | No | Optional description. |
 | `channels` | TEXT[] | Yes | e.g. `INBOUND_CALL`, `OUTBOUND_CALL`, `CHAT`, `TICKET`, `AGENT_ASSIST`. |
@@ -129,9 +129,10 @@ One row = one **version** of a scorecard. Sections are embedded as JSONB.
 
 | Column | Type | Required | Description |
 |---|---|---|---|
-| `question_id` | VARCHAR(64) | PK | UUID. New ID on each version clone/import. |
-| `question_lineage_id` | VARCHAR(64) | Yes | Stable across versions. |
-| `scorecard_id` | VARCHAR(64) | FK | Parent scorecard version. |
+| `question_id` | VARCHAR(64) | PK (with scorecard id + version) | Stable across versions; new id only for new questions. |
+| `question_lineage_id` | VARCHAR(64) | Yes | Same as `question_id` for new questions. |
+| `scorecard_id` | VARCHAR(64) | FK | Parent logical scorecard. |
+| `scorecard_version` | INTEGER | FK | Matches `scorecards.version` for this row. |
 | `scorecard_lineage_id` | VARCHAR(64) | Yes | Parent lineage (denormalized). |
 | `section_id` | VARCHAR(64) | Yes | Owning section in this version. |
 | `section_lineage_id` | VARCHAR(64) | Yes | Owning section lineage (denormalized). |
@@ -466,7 +467,16 @@ Export payload shape:
   "export_version": "1.0",
   "scorecard": {
     "name": "...",
+    "description": "...",
     "channels": ["INBOUND_CALL"],
+    "state": "ACTIVE",
+    "scorecard_type": "SALES_QA",
+    "fail_scorecard": false,
+    "scoring": { "scoring_mode": "WEIGHTED", "min_applicable_points": 10, "critical_zeroes_score": false },
+    "model_provider": "openai",
+    "ai_model": "gpt-4.1",
+    "total_sections": 1,
+    "total_questions": 2,
     "sections": [
       {
         "section_lineage_id": "...",
@@ -538,6 +548,16 @@ This script:
 3. Drops legacy tables
 
 Safe to re-run (idempotent).
+
+### Upgrade to stable scorecard / question IDs (composite PKs)
+
+If the database was created with per-version `scorecard_id` values:
+
+```bash
+npm run postgres:migrate-stable-ids
+```
+
+Rewrites rows so `scorecard_id` is stable per lineage, adds `scorecard_version` on questions, and switches to composite primary keys. Run once per tenant database after deploying the matching application code.
 
 ---
 

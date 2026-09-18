@@ -10,7 +10,7 @@ class ScorecardService {
     async createScorecard(data) {
         try {
             data.scorecard_id = COMMONUTIL.generateUniqueId();
-            data.lineage_id = COMMONUTIL.generateUniqueId();
+            data.lineage_id = data.scorecard_id;
             data.version = 1;
             data.status = "DRAFT";
             data.origin = "CREATED";
@@ -33,10 +33,14 @@ class ScorecardService {
 
     async getScorecardById(data) {
         try {
-            const result = await this.repo.getScorecardById(data.scorecard_id);
+            const result = await this.repo.getScorecardById(data.scorecard_id, data.version);
             if (!result.result) return result;
 
-            const questions = await this.repo.getQuestionsByScorecardId(data.scorecard_id, "created_at");
+            const questions = await this.repo.getQuestionsByScorecardId(
+                data.scorecard_id,
+                result.result.version,
+                "created_at"
+            );
             const questionMap = {};
             for (const q of questions) {
                 questionMap[q.question_id] = q;
@@ -46,8 +50,12 @@ class ScorecardService {
             scorecard.sections = scorecard.sections
                 .map((section) => ({
                     ...section,
-                    questions: section.questions
-                        .map((questionId) => questionMap[questionId] || null)
+                    questions: (section.questions || [])
+                        .map((ref) => {
+                            const qid = typeof ref === "string" ? ref : ref?.question_id;
+                            if (!qid) return null;
+                            return questionMap[qid] || null;
+                        })
                         .filter(Boolean)
                         .sort((a, b) => (a.sequence || 0) - (b.sequence || 0)),
                 }))
@@ -78,7 +86,7 @@ class ScorecardService {
                 created_at, updated_at,
                 ...updatableFields
             } = data;
-            return await this.repo.updateScorecard(scorecard_id, updatableFields);
+            return await this.repo.updateScorecard(scorecard_id, version, updatableFields);
         } catch (error) {
             throw error;
         }
@@ -94,14 +102,30 @@ class ScorecardService {
 
     async publishScorecard(data) {
         try {
-            const scResult = await this.repo.getScorecardById(data.scorecard_id);
-            const questions = await this.repo.getQuestionsByScorecardId(data.scorecard_id, "sequence");
+            const ver = await this.repo.resolveEditableDraftVersion(
+                data.scorecard_id,
+                data.version
+            );
+            if (ver == null) throw new Error("No draft scorecard found to publish");
+
+            const scResult = await this.getScorecardById({
+                scorecard_id: data.scorecard_id,
+                version: ver,
+            });
             if (!scResult.result) throw new Error("Scorecard not found");
+            const questions = await this.repo.getQuestionsByScorecardId(
+                data.scorecard_id,
+                ver,
+                "sequence"
+            );
             const { errors } = this._validateForPublish(scResult.result, questions);
             if (errors.length > 0) throw new Error("Publish blocked: " + errors.join("; "));
 
             return await this.repo.publishScorecard(
-                data.scorecard_id, data.published_by, data.updated_by
+                data.scorecard_id,
+                ver,
+                data.published_by,
+                data.updated_by ?? data.published_by
             );
         } catch (error) {
             throw error;
@@ -112,6 +136,7 @@ class ScorecardService {
         try {
             const draftResult = await this.repo.createDraft(
                 data.scorecard_id,
+                data.source_version ?? data.version,
                 data.created_by,
                 data.updated_by,
                 () => COMMONUTIL.generateUniqueId()
@@ -124,7 +149,15 @@ class ScorecardService {
 
     async disableScorecard(data) {
         try {
-            return await this.repo.updateStatus(data.scorecard_id, "PUBLISHED", {
+            if (data.version != null) {
+                return await this.repo.updateStatus(data.scorecard_id, data.version, "PUBLISHED", {
+                    status: "DISABLED",
+                    disabled_at: new Date(),
+                    disabled_by: data.disabled_by,
+                    updated_by: data.updated_by,
+                });
+            }
+            return await this.repo.updateStatusForLatest(data.scorecard_id, "PUBLISHED", {
                 status: "DISABLED",
                 disabled_at: new Date(),
                 disabled_by: data.disabled_by,
@@ -137,7 +170,15 @@ class ScorecardService {
 
     async enableScorecard(data) {
         try {
-            return await this.repo.updateStatus(data.scorecard_id, "DISABLED", {
+            if (data.version != null) {
+                return await this.repo.updateStatus(data.scorecard_id, data.version, "DISABLED", {
+                    status: "PUBLISHED",
+                    enabled_at: new Date(),
+                    enabled_by: data.enabled_by,
+                    updated_by: data.enabled_by,
+                });
+            }
+            return await this.repo.updateStatusForLatest(data.scorecard_id, "DISABLED", {
                 status: "PUBLISHED",
                 enabled_at: new Date(),
                 enabled_by: data.enabled_by,
@@ -150,7 +191,7 @@ class ScorecardService {
 
     async archiveScorecard(data) {
         try {
-            return await this.repo.updateStatusAny(data.scorecard_id, {
+            return await this.repo.updateStatusAny(data.scorecard_id, data.version, {
                 status: "ARCHIVED",
                 archived_at: new Date(),
                 archived_by: data.archived_by,
@@ -164,8 +205,7 @@ class ScorecardService {
     async addSection(data) {
         try {
             const sectionId = COMMONUTIL.generateUniqueId();
-            const sectionLineageId = COMMONUTIL.generateUniqueId();
-            return await this.repo.addSection(data, sectionId, sectionLineageId);
+            return await this.repo.addSection(data, sectionId, sectionId);
         } catch (error) {
             throw error;
         }
@@ -192,11 +232,11 @@ class ScorecardService {
             const questionId = COMMONUTIL.generateUniqueId();
             const questionDoc = {
                 question_id: questionId,
-                question_lineage_id: COMMONUTIL.generateUniqueId(),
+                question_lineage_id: questionId,
                 scorecard_id: data.scorecard_id,
-                scorecard_lineage_id: data.scorecard_lineage_id,
+                scorecard_lineage_id: data.scorecard_lineage_id || data.scorecard_id,
                 section_id: data.section_id,
-                section_lineage_id: data.section_lineage_id,
+                section_lineage_id: data.section_lineage_id || data.section_id,
                 version: 1,
                 sequence: data.sequence,
                 question_text: data.question_text,
@@ -214,11 +254,12 @@ class ScorecardService {
                 updated_by: data.updated_by,
             };
 
-            await this.repo.addQuestion(data, questionDoc);
+            const scorecardVersion = await this.repo.addQuestion(data, questionDoc);
             return {
                 result: {
                     question_id: questionDoc.question_id,
                     question_lineage_id: questionDoc.question_lineage_id,
+                    scorecard_version: scorecardVersion,
                 },
             };
         } catch (error) {
@@ -228,36 +269,52 @@ class ScorecardService {
 
     async updateQuestion(data) {
         try {
-            const existingQuestion = await this.repo.getQuestionById(data.question_id);
-            if (!existingQuestion) {
-                throw new Error(`Question not found: ${data.question_id}`);
+            let scorecardId = data.scorecard_id;
+            let scorecardVersion = data.version ?? data.scorecard_version;
+
+            if (!scorecardId || scorecardVersion == null) {
+                const existing = await this.repo.getQuestionById(data.question_id);
+                if (!existing) {
+                    throw new Error(`Question not found: ${data.question_id}`);
+                }
+                scorecardId = scorecardId || existing.scorecard_id;
+                scorecardVersion = scorecardVersion ?? existing.scorecard_version;
             }
 
-            const parentScorecardId = existingQuestion.scorecard_id;
-            if (parentScorecardId) {
-                const parent = await this.repo.getScorecardById(parentScorecardId);
-                if (parent.result && parent.result.status === "PUBLISHED") {
-                    throw new Error("Cannot edit a question on a published scorecard. Create a draft first.");
-                }
+            scorecardVersion = await this.repo.resolveEditableDraftVersion(
+                scorecardId,
+                scorecardVersion
+            );
+            if (!scorecardId || scorecardVersion == null) {
+                throw new Error("scorecard_id and version are required to update a question");
+            }
+
+            const parent = await this.repo.getScorecardById(scorecardId, scorecardVersion);
+            if (!parent.result) throw new Error("Scorecard not found");
+            if (parent.result.status === "PUBLISHED") {
+                throw new Error("Cannot edit a question on a published scorecard. Create a draft first.");
             }
 
             const {
                 question_id, question_lineage_id, version,
-                scorecard_id, scorecard_lineage_id,
+                scorecard_id, scorecard_lineage_id, scorecard_version,
                 section_id, section_lineage_id,
                 created_by, created_at, updated_at,
                 ...updatableFields
             } = data;
 
-            const result = await this.repo.updateQuestion(data.question_id, updatableFields);
+            const result = await this.repo.updateQuestion(
+                scorecardId,
+                scorecardVersion,
+                data.question_id,
+                updatableFields
+            );
             if (result?.result?.matchedCount === 0) {
                 throw new Error(`Question not found: ${data.question_id}`);
             }
 
-            const touchId = data.scorecard_id || parentScorecardId;
-            if (touchId) {
-                await this.repo.touchContentUpdatedAt(touchId);
-            }
+            await this.repo.touchContentUpdatedAt(scorecardId, scorecardVersion);
+            if (result?.result) result.result.scorecard_version = scorecardVersion;
             return result;
         } catch (error) {
             throw error;
@@ -274,7 +331,7 @@ class ScorecardService {
 
     async deleteScorecard(data) {
         try {
-            return await this.repo.deleteScorecard(data.scorecard_id);
+            return await this.repo.deleteScorecard(data.scorecard_id, data.version);
         } catch (error) {
             throw error;
         }
@@ -379,38 +436,69 @@ class ScorecardService {
             throw new Error(`Question count mismatch: sections reference ${totalQuestionsInSections} questions but ${data.questions.length} were provided`);
     }
 
-    async exportScorecard(scorecard_id) {
-        try {
-            const scorecardResult = await this.repo.getScorecardById(scorecard_id);
-            const questions = await this.repo.getQuestionsByScorecardId(scorecard_id, "sequence");
+    _collectQuestionsFromScorecard(scorecard) {
+        const byId = new Map();
+        for (const section of scorecard.sections || []) {
+            for (const ref of section.questions || []) {
+                if (ref && typeof ref === "object" && ref.question_id) {
+                    byId.set(ref.question_id, ref);
+                }
+            }
+        }
+        return [...byId.values()].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+    }
 
-            const scorecard = scorecardResult.result;
-            if (!scorecard) throw new Error("Scorecard not found");
+    async exportScorecard(scorecard_id, version) {
+        try {
+            const full = await this.getScorecardById({ scorecard_id, version });
+            if (!full.result) throw new Error("Scorecard not found");
+
+            const scorecard = full.result;
+            let questions = this._collectQuestionsFromScorecard(scorecard);
+            if (questions.length === 0) {
+                questions = await this.repo.getQuestionsByScorecardId(
+                    scorecard_id,
+                    scorecard.version,
+                    "sequence"
+                );
+            }
 
             const qIdToLineageId = {};
             for (const q of questions) {
-                qIdToLineageId[q.question_id] = q.question_lineage_id;
+                qIdToLineageId[q.question_id] = q.question_lineage_id || q.question_id;
             }
 
             const exportedScorecard = {
                 name:            scorecard.name,
                 description:     scorecard.description,
                 channels:        scorecard.channels || [],
+                state:           scorecard.state || null,
+                scorecard_type:  scorecard.scorecard_type || null,
+                fail_scorecard:  scorecard.fail_scorecard || false,
+                scoring:         scorecard.scoring || null,
+                model_provider:  scorecard.model_provider || null,
+                ai_model:        scorecard.ai_model || null,
                 total_sections:  scorecard.total_sections,
                 total_questions: scorecard.total_questions,
-                sections: scorecard.sections.map((s) => ({
-                    section_lineage_id: s.section_lineage_id,
-                    name:       s.name,
-                    sequence:   s.sequence,
-                    weighting:  s.weighting,
+                sections: (scorecard.sections || []).map((s) => ({
+                    section_lineage_id: s.section_lineage_id || s.section_id,
+                    name:         s.name,
+                    sequence:     s.sequence,
+                    weighting:    s.weighting,
                     fail_section: s.fail_section,
-                    questions:  s.questions.map((ref) => qIdToLineageId[ref] || ref),
+                    questions:    (s.questions || []).map((ref) => {
+                        if (ref && typeof ref === "object") {
+                            return ref.question_lineage_id || ref.question_id;
+                        }
+                        const qid = typeof ref === "string" ? ref : ref?.question_id;
+                        return qIdToLineageId[qid] || qid;
+                    }).filter(Boolean),
                 })),
             };
 
             const exportedQuestions = questions.map((q) => ({
-                question_lineage_id: q.question_lineage_id,
-                section_lineage_id:  q.section_lineage_id,
+                question_lineage_id: q.question_lineage_id || q.question_id,
+                section_lineage_id:  q.section_lineage_id || q.section_id,
                 sequence:            q.sequence,
                 question_text:       q.question_text,
                 question_type:       q.question_type,
@@ -432,6 +520,7 @@ class ScorecardService {
                     source_info: {
                         scorecard_id: scorecard.scorecard_id,
                         lineage_id:   scorecard.lineage_id,
+                        version:      scorecard.version,
                         name:         scorecard.name,
                     },
                     scorecard:      exportedScorecard,
@@ -448,19 +537,20 @@ class ScorecardService {
             this._validateImportPayload(data);
 
             const newScorecardId = COMMONUTIL.generateUniqueId();
-            const newScorecardLineageId = COMMONUTIL.generateUniqueId();
 
             const sectionLineageMap = {};
             data.scorecard.sections.forEach((section) => {
+                const sectionId = COMMONUTIL.generateUniqueId();
                 sectionLineageMap[section.section_lineage_id] = {
-                    section_id:         COMMONUTIL.generateUniqueId(),
-                    section_lineage_id: COMMONUTIL.generateUniqueId(),
+                    section_id:         sectionId,
+                    section_lineage_id: sectionId,
                 };
             });
 
             const questionLineageToNewId = {};
             data.questions.forEach((q) => {
-                questionLineageToNewId[q.question_lineage_id] = COMMONUTIL.generateUniqueId();
+                const qid = COMMONUTIL.generateUniqueId();
+                questionLineageToNewId[q.question_lineage_id] = qid;
             });
 
             const newSections = data.scorecard.sections.map((section) => {
@@ -480,9 +570,10 @@ class ScorecardService {
                 const owningSection = sectionLineageMap[q.section_lineage_id];
                 return {
                     question_id:          questionLineageToNewId[q.question_lineage_id],
-                    question_lineage_id:  COMMONUTIL.generateUniqueId(),
+                    question_lineage_id:  questionLineageToNewId[q.question_lineage_id],
                     scorecard_id:         newScorecardId,
-                    scorecard_lineage_id: newScorecardLineageId,
+                    scorecard_version:    1,
+                    scorecard_lineage_id: newScorecardId,
                     section_id:           owningSection.section_id,
                     section_lineage_id:   owningSection.section_lineage_id,
                     version:              1,
@@ -505,7 +596,7 @@ class ScorecardService {
 
             const newScorecard = {
                 scorecard_id:        newScorecardId,
-                lineage_id:          newScorecardLineageId,
+                lineage_id:          newScorecardId,
                 version:             1,
                 status:              "DRAFT",
                 origin:              "IMPORTED",
@@ -513,8 +604,11 @@ class ScorecardService {
                 description:         data.scorecard.description || null,
                 channels:            data.scorecard.channels || [],
                 state:               data.scorecard.state || null,
+                scorecard_type:      data.scorecard.scorecard_type || null,
                 scoring:             data.scorecard.scoring || null,
                 fail_scorecard:      data.scorecard.fail_scorecard || false,
+                model_provider:      data.scorecard.model_provider || null,
+                ai_model:            data.scorecard.ai_model || null,
                 total_sections:      newSections.length,
                 total_questions:     newQuestionDocs.length,
                 source_scorecard_id: data.source_info?.scorecard_id || null,
@@ -543,17 +637,27 @@ class ScorecardService {
 
     async getAuditLogByScorecardId(data) {
         try {
-            return await this.repo.getAuditLogByScorecardId(data.scorecard_id);
+            return await this.repo.getAuditLogByScorecardId(data.scorecard_id, data.version);
         } catch (error) {
             throw error;
         }
     }
 
-    async validateScorecard(scorecard_id) {
+    async validateScorecard(scorecard_id, version) {
         try {
-            const scResult = await this.repo.getScorecardById(scorecard_id);
-            const questions = await this.repo.getQuestionsByScorecardId(scorecard_id, "sequence");
+            const ver = await this.repo.resolveEditableDraftVersion(scorecard_id, version);
+            const loadVersion = ver ?? version;
+            const scResult = await this.getScorecardById({
+                scorecard_id,
+                version: loadVersion,
+            });
             if (!scResult.result) throw new Error("Scorecard not found");
+            const qVersion = ver ?? scResult.result.version;
+            const questions = await this.repo.getQuestionsByScorecardId(
+                scorecard_id,
+                qVersion,
+                "sequence"
+            );
             return { result: this._validateForPublish(scResult.result, questions) };
         } catch (error) {
             throw error;
