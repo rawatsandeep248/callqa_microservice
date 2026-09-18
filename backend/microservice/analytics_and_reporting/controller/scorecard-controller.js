@@ -68,6 +68,7 @@ class ScorecardController {
         try {
             const result = await this.scorecardService.getScorecardById({
                 scorecard_id: req.params.scorecard_id,
+                version: req.query.version != null ? Number(req.query.version) : undefined,
             });
             if (!result.result) {
                 return res.notFound(MESSAGEUTIL.error().RECORD_NOT_EXIST);
@@ -286,8 +287,9 @@ class ScorecardController {
             if (!scorecard_id) {
                 return res.badRequest("'scorecard_id' is required");
             }
-            const result = await this.scorecardService.exportScorecard(scorecard_id);
-            res.success(result, MESSAGEUTIL.response().SUCCESSFULLY_FETCHED);
+            const version = req.query.version != null ? Number(req.query.version) : undefined;
+            const result = await this.scorecardService.exportScorecard(scorecard_id, version);
+            res.success(result.result ?? result, MESSAGEUTIL.response().SUCCESSFULLY_FETCHED);
         } catch (error) {
             next(error);
         }
@@ -308,7 +310,8 @@ class ScorecardController {
             if (!scorecard_id) {
                 return res.badRequest("'scorecard_id' is required");
             }
-            const result = await this.scorecardService.deleteScorecard({ scorecard_id });
+            const version = req.query.version != null ? Number(req.query.version) : undefined;
+            const result = await this.scorecardService.deleteScorecard({ scorecard_id, version });
             res.success(result, MESSAGEUTIL.response().SUCCESSFULLY_DELETED || "Successfully deleted");
         } catch (error) {
             next(error);
@@ -334,7 +337,8 @@ class ScorecardController {
             if (!scorecard_id) {
                 return res.badRequest("'id' is required");
             }
-            const result = await this.scorecardService.getAuditLogByScorecardId({ scorecard_id });
+            const version = req.query.version != null ? Number(req.query.version) : undefined;
+            const result = await this.scorecardService.getAuditLogByScorecardId({ scorecard_id, version });
             if (!result.result) {
                 return res.notFound(MESSAGEUTIL.error().RECORD_NOT_EXIST);
             }
@@ -351,7 +355,8 @@ class ScorecardController {
             if (!scorecard_id) {
                 return res.badRequest("'scorecard_id' is required");
             }
-            const result = await this.scorecardService.validateScorecard(scorecard_id);
+            const version = req.query.version != null ? Number(req.query.version) : undefined;
+            const result = await this.scorecardService.validateScorecard(scorecard_id, version);
             res.success(result, MESSAGEUTIL.response().SUCCESSFULLY_FETCHED);
         } catch (error) {
             next(error);
